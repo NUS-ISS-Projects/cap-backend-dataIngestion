@@ -19,12 +19,28 @@ class DisApplicationTests {
 
 
 
+===== File: src/main/java/com/cap/dis/DisDataIngestionApplication.java =====
+
+package com.cap.dis;
+
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.scheduling.annotation.EnableAsync;
+
+@SpringBootApplication
+@EnableAsync
+public class DisDataIngestionApplication {
+    public static void main(String[] args) {
+        SpringApplication.run(DisDataIngestionApplication.class, args);
+    }
+}
+========================
+
+
+
 ===== File: src/main/java/com/cap/dis/config/KafkaProducerConfig.java =====
 
 package com.cap.dis.config;
-
-import java.util.HashMap;
-import java.util.Map;
 
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.serialization.StringSerializer;
@@ -35,10 +51,13 @@ import org.springframework.kafka.core.DefaultKafkaProducerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.core.ProducerFactory;
 
+import java.util.HashMap;
+import java.util.Map;
+
 @Configuration
 public class KafkaProducerConfig {
 
-    @Value("${kafka.bootstrap-servers}")
+    @Value("${spring.kafka.bootstrap-servers}")
     private String bootstrapServers;
 
     @Bean
@@ -63,21 +82,36 @@ public class KafkaProducerConfig {
 
 package com.cap.dis.service;
 
-import org.springframework.beans.factory.annotation.Autowired;
+import lombok.RequiredArgsConstructor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.kafka.support.SendResult;
 import org.springframework.stereotype.Service;
 
+import java.util.concurrent.CompletableFuture;
+
 @Service
+@RequiredArgsConstructor
 public class KafkaProducerService {
 
-    @Autowired
-    private KafkaTemplate<String, String> kafkaTemplate;
+    private static final Logger log = LoggerFactory.getLogger(KafkaProducerService.class);
 
-    private final String topic = "dis-pdus";
+    private final KafkaTemplate<String, String> kafkaTemplate;
+
+    @Value("${kafka.topic}")
+    private String topic;
 
     public void sendMessage(String message) {
-        kafkaTemplate.send(topic, message);
-        System.out.println("Sent message to Kafka topic '" + topic + "': " + message);
+        CompletableFuture<SendResult<String, String>> future = kafkaTemplate.send(topic, message);
+        future.whenComplete((result, ex) -> {
+            if (ex == null) {
+                log.info("Sent message to Kafka topic {}: {}", topic, message);
+            } else {
+                log.error("Failed to send message to Kafka topic {}: {}", topic, ex.getMessage());
+            }
+        });
     }
 }
 ========================
@@ -88,77 +122,96 @@ public class KafkaProducerService {
 
 package com.cap.dis.service;
 
-import java.net.DatagramPacket;
-import java.net.DatagramSocket;
-import java.nio.charset.StandardCharsets;
-
-import org.springframework.beans.factory.annotation.Autowired;
+import edu.nps.moves.dis.EntityStatePdu;
+import edu.nps.moves.dis.Pdu;
+import edu.nps.moves.disutil.PduFactory;
+import lombok.RequiredArgsConstructor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
+import javax.annotation.PostConstruct;
+import java.net.BindException;
+import java.net.DatagramPacket;
+import java.net.DatagramSocket;
+import java.util.Arrays;
+
 @Service
+@RequiredArgsConstructor
 public class UdpListenerService {
 
-    private static final int PORT = 3000;
-    private static final int BUFFER_SIZE = 2048;
+    private static final Logger log = LoggerFactory.getLogger(UdpListenerService.class);
 
-    @Autowired
-    private KafkaProducerService kafkaProducerService;
+    @Value("${udp.port}")
+    private int port;
 
+    @Value("${udp.buffer-size}")
+    private int bufferSize;
+
+    private final KafkaProducerService kafkaProducerService;
+
+    private final PduFactory pduFactory = new PduFactory();
+
+    @PostConstruct
+    public void init() {
+        startListening();
+    }
+
+    @Async
     public void startListening() {
-        try (DatagramSocket socket = new DatagramSocket(PORT)) {
-            byte[] buffer = new byte[BUFFER_SIZE];
-            System.out.println("UDP Listener started on port " + PORT);
+        try (DatagramSocket socket = new DatagramSocket(port)) {
+            byte[] buffer = new byte[bufferSize];
+            log.info("UDP Listener started on port {}", port);
             while (true) {
                 DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
                 socket.receive(packet);
-                String rawData = new String(packet.getData(), 0, packet.getLength(), StandardCharsets.UTF_8);
-                
-                // Simulate decoding the DIS PDU
+                byte[] rawData = Arrays.copyOfRange(packet.getData(), 0, packet.getLength());
                 String decodedData = decodeDisPdu(rawData);
-                
-                // Publish the decoded data to Kafka
                 kafkaProducerService.sendMessage(decodedData);
             }
+        } catch (BindException e) {
+            log.error("Failed to bind to UDP port {}: Address already in use. Please free the port or configure a different one in application.properties.", port, e);
+            // Optionally, shut down the application
+            System.exit(1); // Exit with error code
         } catch (Exception e) {
-            e.printStackTrace();
+            log.error("Error in UDP listener", e);
         }
     }
 
-    private String decodeDisPdu(String rawData) {
-        // TODO: Replace with real decoding logic for DIS PDUs
-        return "Decoded PDU: " + rawData;
-    }
-}
-========================
-
-
-
-===== File: src/main/java/com/cap/dis/DataIngestionApplication.java =====
-
-package com.cap.dis;
-
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.CommandLineRunner;
-import org.springframework.boot.SpringApplication;
-import org.springframework.boot.autoconfigure.SpringBootApplication;
-import com.cap.dis.service.UdpListenerService;
-
-@SpringBootApplication
-public class DataIngestionApplication implements CommandLineRunner {
-
-    @Autowired
-    private UdpListenerService udpListenerService;
-
-    public static void main(String[] args) {
-        SpringApplication.run(DataIngestionApplication.class, args);
+    private String decodeDisPdu(byte[] rawData) {
+        try {
+            Pdu pdu = pduFactory.createPdu(rawData);
+            if (pdu != null) {
+                return pduToJson(pdu);
+            } else {
+                log.warn("Received unknown PDU type");
+                return "{\"error\":\"Unknown PDU type\"}";
+            }
+        } catch (Exception e) {
+            log.error("Failed to decode PDU", e);
+            return "{\"error\":\"Error decoding PDU\"}";
+        }
     }
 
-    @Override
-    public void run(String... args) throws Exception {
-        // Start the UDP listener in a separate thread
-        new Thread(() -> {
-            udpListenerService.startListening();
-        }).start();
+    private String pduToJson(Pdu pdu) {
+        if (pdu instanceof EntityStatePdu esp) {
+            return String.format(
+                "{\"type\":\"EntityStatePdu\"," +
+                "\"entityId\":{\"site\":%d,\"application\":%d,\"entity\":%d}," +
+                "\"location\":{\"x\":%.2f,\"y\":%.2f,\"z\":%.2f}," +
+                "\"timestamp\":%d}",
+                esp.getEntityID().getSite(),
+                esp.getEntityID().getApplication(),
+                esp.getEntityID().getEntity(),
+                esp.getEntityLocation().getX(),
+                esp.getEntityLocation().getY(),
+                esp.getEntityLocation().getZ(),
+                System.currentTimeMillis()
+            );
+        }
+        return "{\"type\":\"" + pdu.getClass().getSimpleName() + "\", \"timestamp\":" + System.currentTimeMillis() + "}";
     }
 }
 ========================
@@ -172,8 +225,13 @@ spring.application.name=dis
 # The port on which the Spring Boot app runs
 server.port=8080
 
-# Kafka bootstrap server configuration
-kafka.bootstrap-servers=localhost:9092
+# UDP Listener Configuration
+udp.port=3000
+udp.buffer-size=2048
+
+# Kafka Configuration
+spring.kafka.bootstrap-servers=localhost:9092
+kafka.topic=dis-pdus
 ========================
 
 
