@@ -89,7 +89,7 @@ import socket
 import time
 from io import BytesIO
 from opendis.DataOutputStream import DataOutputStream
-from opendis.dis7 import EntityStatePdu, FirePdu
+from opendis.dis7 import EntityStatePdu, FirePdu, CollisionPdu
 from opendis.RangeCoordinates import GPS, deg2rad
 
 UDP_PORT = 3000
@@ -188,22 +188,52 @@ def send_fire_pdu(protocol_version):
 
     udpSocket.sendto(data, (DESTINATION_ADDRESS, UDP_PORT))
     print(f"Sent FirePdu v{protocol_version}. {len(data)} bytes.")
+    
+def send_collision_pdu(protocol_version):
+    pdu = CollisionPdu()
+    pdu.protocolVersion = protocol_version
+    pdu.pduType = 4  # Collision PDU type
+    pdu.pduStatus = 0
+    pdu.exerciseID = 1
+
+    # Issuing entity (entity reporting collision)
+    pdu.issuingEntityID.entityID = 88
+    pdu.issuingEntityID.siteID = 18
+    pdu.issuingEntityID.applicationID = 23
+
+    # Colliding entity
+    pdu.collidingEntityID.entityID = 200
+    pdu.collidingEntityID.siteID = 19
+    pdu.collidingEntityID.applicationID = 24
+
+    memoryStream = BytesIO()
+    outputStream = DataOutputStream(memoryStream)
+    pdu.serialize(outputStream)
+    data = memoryStream.getvalue()
+
+    udpSocket.sendto(data, (DESTINATION_ADDRESS, UDP_PORT))
+    print(f"Sent CollisionPdu v{protocol_version}. {len(data)} bytes.")
 
 def main():
     # Send an EntityStatePdu for DIS v6
     print("Sending DIS EntityStatePdu for v6...")
     send_entity_state_pdu(6)
-    time.sleep(5)
+    time.sleep(2)
     
     # Send an EntityStatePdu for DIS v7
     print("Sending DIS EntityStatePdu for v7...")
     send_entity_state_pdu(7)
-    time.sleep(5)
+    time.sleep(2)
     
     # Send a FirePdu for DIS v7 (example)
     print("Sending DIS FirePdu for v7...")
     send_fire_pdu(7)
-    time.sleep(5)
+    time.sleep(2)
+    
+    # Send a FirePdu for DIS v7 (example)
+    print("Sending DIS CollisionPdu for v7...")
+    send_collision_pdu(7)
+    time.sleep(2)
 
 if __name__ == "__main__":
     main()

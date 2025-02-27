@@ -1,7 +1,6 @@
 package com.cap.dis.service;
 
-import edu.nps.moves.dis.EntityStatePdu;
-import edu.nps.moves.dis.Pdu;
+import edu.nps.moves.dis.*;
 import edu.nps.moves.disutil.PduFactory;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -11,7 +10,6 @@ import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
 import javax.annotation.PostConstruct;
-import java.net.BindException;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.util.Arrays;
@@ -49,12 +47,9 @@ public class UdpListenerService {
                 String decodedData = decodeDisPdu(rawData);
                 kafkaProducerService.sendMessage(decodedData);
             }
-        } catch (BindException e) {
-            log.error("Failed to bind to UDP port {}: Address already in use. Please free the port or configure a different one in application.properties.", port, e);
-            // Optionally, shut down the application
-            System.exit(1); // Exit with error code
         } catch (Exception e) {
             log.error("Error in UDP listener", e);
+            System.exit(1);
         }
     }
 
@@ -74,21 +69,56 @@ public class UdpListenerService {
     }
 
     private String pduToJson(Pdu pdu) {
+        StringBuilder json = new StringBuilder("{");
+        json.append("\"type\":\"").append(pdu.getClass().getSimpleName()).append("\",");
+        json.append("\"protocolVersion\":").append(pdu.getProtocolVersion()).append(",");
+        json.append("\"exerciseID\":").append(pdu.getExerciseID()).append(",");
+        json.append("\"pduType\":").append(pdu.getPduType()).append(",");
+        json.append("\"timestamp\":").append(pdu.getTimestamp()).append(",");
+
         if (pdu instanceof EntityStatePdu esp) {
-            return String.format(
-                "{\"type\":\"EntityStatePdu\"," +
-                "\"entityId\":{\"site\":%d,\"application\":%d,\"entity\":%d}," +
-                "\"location\":{\"x\":%.2f,\"y\":%.2f,\"z\":%.2f}," +
-                "\"timestamp\":%d}",
-                esp.getEntityID().getSite(),
-                esp.getEntityID().getApplication(),
-                esp.getEntityID().getEntity(),
-                esp.getEntityLocation().getX(),
-                esp.getEntityLocation().getY(),
-                esp.getEntityLocation().getZ(),
-                System.currentTimeMillis()
-            );
+            json.append("\"entityId\":{");
+            json.append("\"site\":").append(esp.getEntityID().getSite()).append(",");
+            json.append("\"application\":").append(esp.getEntityID().getApplication()).append(",");
+            json.append("\"entity\":").append(esp.getEntityID().getEntity());
+            json.append("},");
+            json.append("\"location\":{");
+            json.append("\"x\":").append(esp.getEntityLocation().getX()).append(",");
+            json.append("\"y\":").append(esp.getEntityLocation().getY()).append(",");
+            json.append("\"z\":").append(esp.getEntityLocation().getZ());
+            json.append("}");
+        } else if (pdu instanceof FirePdu fp) {
+            json.append("\"firingEntityId\":{");
+            json.append("\"site\":").append(fp.getFiringEntityID().getSite()).append(",");
+            json.append("\"application\":").append(fp.getFiringEntityID().getApplication()).append(",");
+            json.append("\"entity\":").append(fp.getFiringEntityID().getEntity());
+            json.append("},");
+            json.append("\"targetEntityId\":{");
+            json.append("\"site\":").append(fp.getTargetEntityID().getSite()).append(",");
+            json.append("\"application\":").append(fp.getTargetEntityID().getApplication()).append(",");
+            json.append("\"entity\":").append(fp.getTargetEntityID().getEntity());
+            json.append("},");
+            json.append("\"munitionId\":{");
+            json.append("\"site\":").append(fp.getMunitionID().getSite()).append(",");
+            json.append("\"application\":").append(fp.getMunitionID().getApplication()).append(",");
+            json.append("\"entity\":").append(fp.getMunitionID().getEntity());
+            json.append("}");
+        }  else if (pdu instanceof CollisionPdu cp) {
+            json.append("\"entityId\":{");
+            json.append("\"site\":").append(cp.getIssuingEntityID().getSite()).append(",");
+            json.append("\"application\":").append(cp.getIssuingEntityID().getApplication()).append(",");
+            json.append("\"entity\":").append(cp.getIssuingEntityID().getEntity());
+            json.append("},");
+            json.append("\"collidingEntityId\":{");
+            json.append("\"site\":").append(cp.getCollidingEntityID().getSite()).append(",");
+            json.append("\"application\":").append(cp.getCollidingEntityID().getApplication()).append(",");
+            json.append("\"entity\":").append(cp.getCollidingEntityID().getEntity());
+            json.append("}");
+        } else {
+            json.append("\"details\":\"Unhandled PDU type, basic metadata only\"");
         }
-        return "{\"type\":\"" + pdu.getClass().getSimpleName() + "\", \"timestamp\":" + System.currentTimeMillis() + "}";
+
+        json.append(",\"processedAt\":").append(System.currentTimeMillis()).append("}");
+        return json.toString();
     }
 }
