@@ -9,9 +9,9 @@
 		<relativePath/> <!-- lookup parent from repository -->
 	</parent>
 	<groupId>com.cap</groupId>
-	<artifactId>dis</artifactId>
+	<artifactId>data-ingestion-service</artifactId>
 	<version>0.0.1-SNAPSHOT</version>
-	<name>dis</name>
+	<name>data-ingestion-service</name>
 	<description>Demo project for Spring Boot</description>
 	<url/>
 	<licenses>
