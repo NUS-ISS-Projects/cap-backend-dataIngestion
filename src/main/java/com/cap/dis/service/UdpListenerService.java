@@ -9,7 +9,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
-import javax.annotation.PostConstruct;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.util.Arrays;
@@ -29,11 +28,6 @@ public class UdpListenerService {
     private final KafkaProducerService kafkaProducerService;
 
     private final PduFactory pduFactory = new PduFactory();
-
-    @PostConstruct
-    public void init() {
-        startListening();
-    }
 
     @Async
     public void startListening() {
@@ -103,7 +97,7 @@ public class UdpListenerService {
             json.append("\"application\":").append(fp.getMunitionID().getApplication()).append(",");
             json.append("\"entity\":").append(fp.getMunitionID().getEntity());
             json.append("}");
-        }  else if (pdu instanceof CollisionPdu cp) {
+        } else if (pdu instanceof CollisionPdu cp) {
             json.append("\"entityId\":{");
             json.append("\"site\":").append(cp.getIssuingEntityID().getSite()).append(",");
             json.append("\"application\":").append(cp.getIssuingEntityID().getApplication()).append(",");
