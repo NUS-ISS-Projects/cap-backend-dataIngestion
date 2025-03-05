@@ -1,77 +1,3 @@
-# #!python
-
-# __author__ = "DMcG"
-# __date__ = "$Jun 23, 2015 10:27:29 AM$"
-
-# import socket
-# import time
-# from io import BytesIO
-# from opendis.DataOutputStream import DataOutputStream
-# from opendis.dis7 import EntityStatePdu
-# from opendis.RangeCoordinates import GPS, deg2rad
-
-# UDP_PORT = 3000
-# DESTINATION_ADDRESS = "127.0.0.1"
-
-# udpSocket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-# udpSocket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-
-# gps = GPS()  # conversion helper
-
-# def send():
-#     pdu = EntityStatePdu()
-#     pdu.pduType = 1
-#     pdu.pduStatus = 0  # Set v7-specific PDU status
-#     pdu.entityID.entityID = 88
-#     pdu.entityID.siteID = 18
-#     pdu.entityID.applicationID = 23
-#     pdu.marking.setString('Igor3d')
-#     pdu.entityAppearance = 0  # Set entity appearance
-
-#     # Set the capabilities field to an integer (e.g., 0 if not used)
-#     pdu.capabilities = 0
-
-#     # Entity in Monterey, CA, USA facing North, no roll or pitch
-#     montereyLocation = gps.llarpy2ecef(
-#         deg2rad(36.6),   # longitude (radians)
-#         deg2rad(-121.9), # latitude (radians)
-#         1,               # altitude (meters)
-#         0,               # roll (radians)
-#         0,               # pitch (radians)
-#         0                # yaw (radians)
-#     )
-
-#     pdu.entityLocation.x = montereyLocation[0]
-#     pdu.entityLocation.y = montereyLocation[1]
-#     pdu.entityLocation.z = montereyLocation[2]
-#     pdu.entityOrientation.psi = montereyLocation[3]
-#     pdu.entityOrientation.theta = montereyLocation[4]
-#     pdu.entityOrientation.phi = montereyLocation[5]
-
-#     # Set additional required fields for DIS v7
-#     pdu.forceId = 1  # Friendly force
-#     pdu.entityType.entityKind = 1  # Platform
-#     pdu.entityType.domain = 1  # Land
-#     pdu.entityType.country = 225  # USA
-#     pdu.entityType.category = 1  # Tank
-#     pdu.entityType.subcategory = 0
-#     pdu.entityType.specific = 0
-#     pdu.entityType.extra = 0
-
-#     memoryStream = BytesIO()
-#     outputStream = DataOutputStream(memoryStream)
-#     pdu.serialize(outputStream)
-#     data = memoryStream.getvalue()
-
-#     while True:
-#         udpSocket.sendto(data, (DESTINATION_ADDRESS, UDP_PORT))
-#         print("Sent {}. {} bytes".format(pdu.__class__.__name__, len(data)))
-#         time.sleep(5)
-        
-# send()
-
-
-
 #!/usr/bin/env python3
 """
 Extended DIS PDU Simulation Script
@@ -81,6 +7,7 @@ It sends:
   - A minimal EntityStatePdu for DIS v6.
   - A minimal EntityStatePdu for DIS v7.
   - A minimal FirePdu for DIS v7 (if available in your opendis package).
+  - A minimal CollisionPdu for DIS v7.
 
 Ensure that the opendis package is installed and properly configured.
 """
@@ -92,8 +19,9 @@ from opendis.DataOutputStream import DataOutputStream
 from opendis.dis7 import EntityStatePdu, FirePdu, CollisionPdu
 from opendis.RangeCoordinates import GPS, deg2rad
 
-UDP_PORT = 3000
-DESTINATION_ADDRESS = "127.0.0.1"
+# Update these values to point to your minikube NodePort service
+UDP_PORT = 32000
+DESTINATION_ADDRESS = "192.168.49.2"  # Replace with the output of `minikube ip`
 
 udpSocket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 udpSocket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
@@ -101,10 +29,6 @@ udpSocket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
 gps = GPS()  # conversion helper
 
 def send_entity_state_pdu(protocol_version):
-    """
-    Crafts and sends a minimal EntityStatePdu.
-    Sets pduStatus to 0 regardless of protocol version to ensure it is an integer.
-    """
     pdu = EntityStatePdu()
     pdu.protocolVersion = protocol_version
     pdu.pduType = 1  # Entity State PDU type
@@ -116,7 +40,6 @@ def send_entity_state_pdu(protocol_version):
     pdu.entityID.applicationID = 23
     pdu.marking.setString("Igor3d")
     pdu.entityAppearance = 0
-
     pdu.capabilities = 0
 
     # Set location (using Monterey, CA, USA coordinates)
@@ -156,10 +79,6 @@ def send_entity_state_pdu(protocol_version):
     print(f"Sent EntityStatePdu v{protocol_version}. {len(data)} bytes.")
 
 def send_fire_pdu(protocol_version):
-    """
-    Crafts and sends a minimal FirePdu for DIS v7.
-    (This example assumes the FirePdu class is available in opendis.dis7.)
-    """
     pdu = FirePdu()
     pdu.protocolVersion = protocol_version
     pdu.pduType = 2  # Example PDU type for FirePdu
@@ -215,22 +134,18 @@ def send_collision_pdu(protocol_version):
     print(f"Sent CollisionPdu v{protocol_version}. {len(data)} bytes.")
 
 def main():
-    # Send an EntityStatePdu for DIS v6
     print("Sending DIS EntityStatePdu for v6...")
     send_entity_state_pdu(6)
     time.sleep(2)
     
-    # Send an EntityStatePdu for DIS v7
     print("Sending DIS EntityStatePdu for v7...")
     send_entity_state_pdu(7)
     time.sleep(2)
     
-    # Send a FirePdu for DIS v7 (example)
     print("Sending DIS FirePdu for v7...")
     send_fire_pdu(7)
     time.sleep(2)
     
-    # Send a FirePdu for DIS v7 (example)
     print("Sending DIS CollisionPdu for v7...")
     send_collision_pdu(7)
     time.sleep(2)
