@@ -1,0 +1,135 @@
+name: Build with Maven and Perform Unit Tests, Code Coverage and Static Analysis
+
+on:
+  push:
+
+env:
+  IMAGE_NAME: ghcr.io/nus-iss-projects/cap-backend-data-ingestion/cap-backend-data-ingestion
+  # DATA: ${{ secrets.GOOGLE_SERVICES_JSON }}
+
+jobs:
+  build:
+    name: Build and test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      repository-projects: write
+
+    steps:
+      - uses: actions/checkout@v3
+      # - name: Retrieve firebase credentials
+      #   run: |
+      #     echo $DATA | base64 -di > app/google-services.json
+      #     if [ ! -f "app/google-services.json" ]; then
+      #       echo "Error: Firebase credentials file not found."
+      #       exit 1
+      #     fi
+      - name: Set up JDK 17
+        uses: actions/setup-java@v3
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: maven
+      - name: Build with Maven
+        run: mvn -B package --file pom.xml
+      - name: Upload JaCoCo Report
+        uses: actions/upload-artifact@v4.6.1
+        with:
+          name: jacoco-report
+          path: target/site/jacoco/
+
+  sonar:
+    name: Build and analyze
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0  # Full clone is needed for proper analysis
+      # - name: Copy Firebase credentials file
+      #   env:
+      #     DATA: ${{ secrets.GOOGLE_SERVICES_JSON }}
+      #   run: |
+      #     echo $DATA | base64 -di > app/google-services.json
+      #     if [ ! -f "app/google-services.json" ]; then
+      #       echo "Error: Firebase credentials file not found."
+      #       exit 1
+      #     fi
+      - name: Set up JDK 17
+        uses: actions/setup-java@v3
+        with:
+          java-version: 17
+          distribution: 'zulu'
+      - name: Cache SonarCloud packages
+        uses: actions/cache@v3
+        with:
+          path: ~/.sonar/cache
+          key: ${{ runner.os }}-sonar
+          restore-keys: ${{ runner.os }}-sonar
+      - name: Cache Maven packages
+        uses: actions/cache@v3
+        with:
+          path: ~/.m2
+          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
+          restore-keys: ${{ runner.os }}-m2
+      - name: Build and analyze
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: mvn -B verify org.sonarsource.scanner.maven:sonar-maven-plugin:sonar -Dsonar.projectKey=NUS-ISS-Projects_cap-backend-dataIngestion
+
+  setup-build-deploy:
+    name: Setup, Build, and Store Artifact
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up JDK 17
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'temurin'
+          java-version: 17
+      # - name: Retrieve firebase credentials
+      #   run: |
+      #     echo $DATA | base64 -di > app/google-services.json
+      #     if [ ! -f "app/google-services.json" ]; then
+      #       echo "Error: Firebase credentials file not found."
+      #       exit 1
+      #     fi    
+      - run: mvn clean install --batch-mode --errors --fail-at-end
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4.6.1
+        with:
+          name: data-ingestion-service-0.0.1-SNAPSHOT.jar
+          path: target/
+
+  build-docker-image:
+    name: Dockerize and push to GitHub Container Registry
+    needs: setup-build-deploy
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Set build date as image tag
+        run: echo "IMAGE_TAG=$(date +'%Y%m%d%H%M%S')" >> $GITHUB_ENV
+      - name: Retrieve saved jar
+        uses: actions/download-artifact@v4.1.9
+        with:
+          name: data-ingestion-service-0.0.1-SNAPSHOT.jar
+          path: target/
+      - name: List files in target directory
+        run: ls target/
+      - name: Set up Docker Build
+        uses: docker/setup-buildx-action@v1
+      - name: Build and push Docker image
+        env:
+          USERNAME: ${{ secrets.GITHUB_USERNAME }}
+          PASSWORD: ${{ secrets.GITHUB_PASSWORD }}
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u $GITHUB_ACTOR --password-stdin
+          docker build --tag ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} .
+          docker tag ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} ${{ env.IMAGE_NAME }}:latest
+          docker push ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+          docker push ${{ env.IMAGE_NAME }}:latest
