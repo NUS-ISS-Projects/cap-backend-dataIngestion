@@ -17,28 +17,27 @@ jobs:
       repository-projects: write
 
     steps:
-    - uses: actions/checkout@v3
-    # - name: Retrieve firebase credentials
-    #   run: |
-    #       echo $DATA | base64 -di > app/google-services.json
-    #       if [ ! -f "app/google-services.json" ]; then
-    #         echo "Error: Firebase credentials file not found."
-    #         exit 1
-    #       fi
-    - name: Set up JDK 17
-      uses: actions/setup-java@v3
-      with:
-        java-version: '17'
-        distribution: 'temurin'
-        cache: maven
-    - name: Build with Maven
-      run: mvn -B package --file pom.xml
-    
-    - name: Upload JaCoCo Report
-      uses: actions/upload-artifact@v3
-      with:
-        name: jacoco-report
-        path: target/site/jacoco/
+      - uses: actions/checkout@v3
+      # - name: Retrieve firebase credentials
+      #   run: |
+      #     echo $DATA | base64 -di > app/google-services.json
+      #     if [ ! -f "app/google-services.json" ]; then
+      #       echo "Error: Firebase credentials file not found."
+      #       exit 1
+      #     fi
+      - name: Set up JDK 17
+        uses: actions/setup-java@v3
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: maven
+      - name: Build with Maven
+        run: mvn -B package --file pom.xml
+      - name: Upload JaCoCo Report
+        uses: actions/upload-artifact@v3.1.2
+        with:
+          name: jacoco-report
+          path: target/site/jacoco/
 
   sonar:
     name: Build and analyze
@@ -46,7 +45,7 @@ jobs:
     steps:
       - uses: actions/checkout@v3
         with:
-          fetch-depth: 0  # Shallow clones should be disabled for a better relevancy of analysis
+          fetch-depth: 0  # Full clone is needed for proper analysis
       # - name: Copy Firebase credentials file
       #   env:
       #     DATA: ${{ secrets.GOOGLE_SERVICES_JSON }}
@@ -60,7 +59,7 @@ jobs:
         uses: actions/setup-java@v3
         with:
           java-version: 17
-          distribution: 'zulu' # Alternative distribution options are available.    
+          distribution: 'zulu'
       - name: Cache SonarCloud packages
         uses: actions/cache@v3
         with:
@@ -75,7 +74,7 @@ jobs:
           restore-keys: ${{ runner.os }}-m2
       - name: Build and analyze
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Needed to get PR information, if any
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: mvn -B verify org.sonarsource.scanner.maven:sonar-maven-plugin:sonar -Dsonar.projectKey=NUS-ISS-Projects_cap-backend-dataIngestion
 
@@ -83,11 +82,11 @@ jobs:
     name: Setup, Build, and Store Artifact
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
       - name: Set up JDK 17
-        uses: actions/setup-java@v2
+        uses: actions/setup-java@v3
         with:
-          distribution: 'adopt'
+          distribution: 'temurin'
           java-version: 17
       # - name: Retrieve firebase credentials
       #   run: |
@@ -98,7 +97,7 @@ jobs:
       #     fi    
       - run: mvn clean install --batch-mode --errors --fail-at-end
       - name: Upload Artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v3.1.2
         with:
           name: data-ingestion-service-0.0.1-SNAPSHOT.jar
           path: target/
@@ -108,33 +107,28 @@ jobs:
     needs: setup-build-deploy
     runs-on: ubuntu-latest
     permissions:
-        contents: read
-        packages: write
+      contents: read
+      packages: write
     steps:
-      - name: checkout
-        uses: actions/checkout@v2
-
+      - name: Checkout
+        uses: actions/checkout@v3
       - name: Set build date as image tag
         run: echo "IMAGE_TAG=$(date +'%Y%m%d%H%M%S')" >> $GITHUB_ENV
-
       - name: Retrieve saved jar
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v3.1.2
         with:
           name: data-ingestion-service-0.0.1-SNAPSHOT.jar
           path: target/
-
       - name: List files in target directory
         run: ls target/
-
       - name: Set up Docker Build
         uses: docker/setup-buildx-action@v1
-
       - name: Build and push Docker image
         env:
           USERNAME: ${{ secrets.GITHUB_USERNAME }}
           PASSWORD: ${{ secrets.GITHUB_PASSWORD }}
         run: |
-          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u $ --password-stdin
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u $GITHUB_ACTOR --password-stdin
           docker build --tag ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} .
           docker tag ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} ${{ env.IMAGE_NAME }}:latest
           docker push ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
