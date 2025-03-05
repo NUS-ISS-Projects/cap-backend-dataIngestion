@@ -4,7 +4,7 @@ on:
   push:
 
 env:
-  IMAGE_NAME: ghcr.io/nus-iss-projects/cap-backend-dataIngestion/cap-backend-dataIngestion
+  IMAGE_NAME: ghcr.io/nus-iss-projects/cap-backend-data-ingestion/cap-backend-data-ingestion
   # DATA: ${{ secrets.GOOGLE_SERVICES_JSON }}
 
 jobs:
