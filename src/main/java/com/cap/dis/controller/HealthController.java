@@ -15,13 +15,8 @@ public class HealthController {
     // to perform additional checks.
 
     @GetMapping("/health")
-    public Map<String, Object> health() {
-        Map<String, Object> status = new HashMap<>();
-        // Here you could check various aspects of your application.
-        // For example, check if UDP service is running, Kafka connectivity, etc.
-        // For now, we simply return a static status.
-        status.put("status", "UP");
-        status.put("message", "Data ingestion service is running");
-        return status;
+    public ResponseEntity<String> healthCheck() {
+        String podName = System.getenv("HOSTNAME");
+        return ResponseEntity.ok("Data ingestion service is up and running on pod: " + podName);
     }
 }
