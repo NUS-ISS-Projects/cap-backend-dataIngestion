@@ -22,6 +22,7 @@ public class KafkaProducerService {
     private String topic;
 
     public void sendMessage(String message) {
+        log.info("Sending to Kafka. Topic: {}, Message: {}", topic, message);
         CompletableFuture<SendResult<String, String>> future = kafkaTemplate.send(topic, message);
         future.whenComplete((result, ex) -> {
             if (ex == null) {

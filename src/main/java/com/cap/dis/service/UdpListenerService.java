@@ -2,9 +2,9 @@ package com.cap.dis.service;
 
 import edu.nps.moves.dis.*;
 import edu.nps.moves.disutil.PduFactory;
-import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
@@ -14,11 +14,10 @@ import java.net.DatagramSocket;
 import java.util.Arrays;
 
 @Service
-@RequiredArgsConstructor
 public class UdpListenerService {
 
     private static final Logger log = LoggerFactory.getLogger(UdpListenerService.class);
-
+    
     @Value("${udp.port}")
     private int port;
 
@@ -26,8 +25,14 @@ public class UdpListenerService {
     private int bufferSize;
 
     private final KafkaProducerService kafkaProducerService;
-
     private final PduFactory pduFactory = new PduFactory();
+    private final DisMetricsTracker metricsTracker;
+
+    @Autowired
+    public UdpListenerService(KafkaProducerService kafkaProducerService, DisMetricsTracker metricsTracker) {
+        this.kafkaProducerService = kafkaProducerService;
+        this.metricsTracker = metricsTracker;
+    }
 
     @Async
     public void startListening() {
@@ -38,11 +43,17 @@ public class UdpListenerService {
                 DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
                 socket.receive(packet);
                 byte[] rawData = Arrays.copyOfRange(packet.getData(), 0, packet.getLength());
+
+                metricsTracker.pduReceived(); // For real-time metrics
+
                 String decodedData = decodeDisPdu(rawData);
-                kafkaProducerService.sendMessage(decodedData);
+                if (decodedData != null) { // Check if decoding was successful before sending
+                    kafkaProducerService.sendMessage(decodedData);
+                }
             }
         } catch (Exception e) {
             log.error("Error in UDP listener", e);
+            // Consider a more graceful shutdown or retry mechanism instead of System.exit(1) in production
             System.exit(1);
         }
     }
@@ -51,13 +62,17 @@ public class UdpListenerService {
         try {
             Pdu pdu = pduFactory.createPdu(rawData);
             if (pdu != null) {
+                // This log helps verify what the DIS library returns directly
+                log.info("PDU Type: {}, Raw PDU Timestamp from pdu.getTimestamp(): {}",
+                         pdu.getClass().getSimpleName(), pdu.getTimestamp());
                 return pduToJson(pdu);
             } else {
-                log.warn("Received unknown PDU type");
+                log.warn("Received unknown PDU type from raw data of length: {}", rawData.length);
+                // It might be useful to log a snippet of the rawData (hex encoded) for unknown types
                 return "{\"error\":\"Unknown PDU type\"}";
             }
         } catch (Exception e) {
-            log.error("Failed to decode PDU", e);
+            log.error("Failed to decode PDU from raw data of length: {}", rawData.length, e);
             return "{\"error\":\"Error decoding PDU\"}";
         }
     }
@@ -68,7 +83,17 @@ public class UdpListenerService {
         json.append("\"protocolVersion\":").append(pdu.getProtocolVersion()).append(",");
         json.append("\"exerciseID\":").append(pdu.getExerciseID()).append(",");
         json.append("\"pduType\":").append(pdu.getPduType()).append(",");
-        json.append("\"timestamp\":").append(pdu.getTimestamp()).append(",");
+
+        // --- TIMESTAMP CORRECTION ---
+        long rawPduTimestamp = pdu.getTimestamp();
+        // The edu.nps.moves.dis.Pdu.unmarshal uses ByteBuffer.getInt() which reads a signed 32-bit int.
+        // If the MSB is set (for absolute DIS time), this results in a negative value.
+        // We need to treat it as an unsigned 32-bit value and represent it as a positive long.
+        long correctedTimestamp = rawPduTimestamp & 0xFFFFFFFFL;
+
+        log.debug("pduToJson - Raw PDU Timestamp from library: {}, Corrected to unsigned long for JSON: {}", rawPduTimestamp, correctedTimestamp);
+        json.append("\"timestamp\":").append(correctedTimestamp).append(",");
+        // --- END OF TIMESTAMP CORRECTION ---
 
         if (pdu instanceof EntityStatePdu esp) {
             json.append("\"entityId\":{");
@@ -109,7 +134,8 @@ public class UdpListenerService {
             json.append("\"entity\":").append(cp.getCollidingEntityID().getEntity());
             json.append("}");
         } else {
-            json.append("\"details\":\"Unhandled PDU type, basic metadata only\"");
+            // For other PDU types, we might still want basic info
+            json.append("\"details\":\"Unhandled PDU type for detailed JSON structure, basic metadata only\"");
         }
 
         json.append(",\"processedAt\":").append(System.currentTimeMillis()).append("}");
