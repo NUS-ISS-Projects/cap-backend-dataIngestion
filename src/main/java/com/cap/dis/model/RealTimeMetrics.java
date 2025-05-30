@@ -8,7 +8,7 @@ import lombok.AllArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 public class RealTimeMetrics {
-    private long lastPduReceivedTimestamp;
-    private long pduCountLastProcessingCycle; // Example: PDUs processed since last metrics query or in last minute
-    // Add other relevant metrics. For a simple example, we'll stick to these.
+    private long lastPduReceivedTimestampMs; // Timestamp of the absolute latest PDU in milliseconds
+    private long pdusInLastSixtySeconds;     // Count of PDUs received in the strictly last 60 seconds
+    private double averagePduRatePerSecondLastSixtySeconds; // Calculated: pdusInLastSixtySeconds / 60.0
 }
