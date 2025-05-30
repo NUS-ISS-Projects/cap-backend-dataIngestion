@@ -64,6 +64,8 @@ public class UdpListenerService {
         try {
             Pdu pdu = pduFactory.createPdu(rawData); 
             if (pdu != null) { 
+                log.info("PDU Type: {}, Raw PDU Timestamp from pdu.getTimestamp(): {}", 
+                     pdu.getClass().getSimpleName(), pdu.getTimestamp());
                 return pduToJson(pdu); 
             } else {
                 log.warn("Received unknown PDU type"); 
