@@ -30,6 +30,7 @@
 		<java.version>17</java.version>
 		<sonar.organization>nus-iss-projects</sonar.organization>
         <sonar.host.url>https://sonarcloud.io</sonar.host.url>
+		<jacoco.version>0.8.10</jacoco.version>
 	</properties>
 	<dependencies>
 
