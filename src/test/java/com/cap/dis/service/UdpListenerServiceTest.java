@@ -12,10 +12,10 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
-import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 // Import for Reflection
+import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.nio.BufferUnderflowException;
 import java.nio.ByteBuffer;
@@ -40,13 +40,22 @@ class UdpListenerServiceTest {
     @Mock
     private DisMetricsTracker metricsTracker; // Mock is still needed if other tests use it or if startListening was testable here
 
-    @Spy
-    private PduFactory pduFactory = new PduFactory();
-
     @InjectMocks
     private UdpListenerService udpListenerService;
+    
+    private PduFactory originalPduFactory;
 
     private ObjectMapper objectMapper = new ObjectMapper();
+    
+    @BeforeEach
+    void setup() throws Exception {
+        // Access the private pduFactory field
+        Field pduFactoryField = UdpListenerService.class.getDeclaredField("pduFactory");
+        pduFactoryField.setAccessible(true);
+        
+        // Store the original pduFactory for later restoration
+        originalPduFactory = (PduFactory) pduFactoryField.get(udpListenerService);
+    }
 
     // Helper method to invoke private methods via reflection
     private Object invokePrivateMethod(Object object, String methodName, Class<?>[] parameterTypes, Object[] parameters) throws Exception {
@@ -179,32 +188,47 @@ class UdpListenerServiceTest {
         // Create a byte array that's large enough to pass the size check but will cause BufferUnderflowException
         byte[] data = new byte[15]; // More than minimum PDU size (12 bytes)
         
+        // Access the private pduFactory field
+        Field pduFactoryField = UdpListenerService.class.getDeclaredField("pduFactory");
+        pduFactoryField.setAccessible(true);
+        
+        // Create a spy of the original pduFactory
+        PduFactory spyPduFactory = spy(originalPduFactory);
+        
         // Mock the PduFactory to throw BufferUnderflowException
-        doThrow(BufferUnderflowException.class).when(pduFactory).createPdu(any(ByteBuffer.class));
+        doThrow(BufferUnderflowException.class).when(spyPduFactory).createPdu(any(byte[].class));
         
-        // Call the method
-        String result = (String) invokePrivateMethod(
-            udpListenerService,
-            "decodeDisPdu",
-            new Class<?>[]{byte[].class},
-            new Object[]{data}
-        );
+        // Set the spy pduFactory back to the service
+        pduFactoryField.set(udpListenerService, spyPduFactory);
         
-        // Debug output to see what's actually in the result
-        System.out.println("BufferUnderflowException test result: " + result);
-        
-        // Verify the result contains the error message with data length
-        JsonNode rootNode = objectMapper.readTree(result);
-        assertTrue(rootNode.has("error"), "Error field is missing in the response");
-        String errorText = rootNode.get("error").asText();
-        System.out.println("Error text: " + errorText);
-        
-        // Check if the error message contains expected text
-        assertTrue(errorText.contains("Error decoding PDU") || 
-                   errorText.contains("Insufficient data") || 
-                   errorText.contains("BufferUnderflowException"), 
-                   "Error message doesn't contain expected text: " + errorText);
-        assertTrue(rootNode.has("length"), "Length field is missing in the response");
+        try {
+            // Call the method
+            String result = (String) invokePrivateMethod(
+                udpListenerService,
+                "decodeDisPdu",
+                new Class<?>[]{byte[].class},
+                new Object[]{data}
+            );
+            
+            // Debug output to see what's actually in the result
+            System.out.println("BufferUnderflowException test result: " + result);
+            
+            // Verify the result contains the error message with data length
+            JsonNode rootNode = objectMapper.readTree(result);
+            assertTrue(rootNode.has("error"), "Error field is missing in the response");
+            String errorText = rootNode.get("error").asText();
+            System.out.println("Error text: " + errorText);
+            
+            // Check if the error message contains expected text
+            assertTrue(errorText.contains("Unknown PDU type") || 
+                       errorText.contains("Insufficient data") || 
+                       errorText.contains("BufferUnderflowException"), 
+                       "Error message doesn't contain expected text: " + errorText);
+            assertTrue(rootNode.has("length"), "Length field is missing in the response");
+        } finally {
+            // Restore the original pduFactory
+            pduFactoryField.set(udpListenerService, originalPduFactory);
+        }
     }
     
     @Test
@@ -229,24 +253,39 @@ class UdpListenerServiceTest {
     
     @Test
     void testDecodeDisPdu_unknownPduType() throws Exception {
+        // Access the private pduFactory field
+        Field pduFactoryField = UdpListenerService.class.getDeclaredField("pduFactory");
+        pduFactoryField.setAccessible(true);
+        
+        // Create a spy of the original pduFactory
+        PduFactory spyPduFactory = spy(originalPduFactory);
+        
         // Mock the PduFactory to return null (unknown PDU type)
-        when(pduFactory.createPdu(any(ByteBuffer.class))).thenReturn(null);
+        doReturn(null).when(spyPduFactory).createPdu(any(byte[].class));
         
-        // Create a byte array that's large enough to be a valid PDU
-        byte[] validSizeData = new byte[20];
+        // Set the spy pduFactory back to the service
+        pduFactoryField.set(udpListenerService, spyPduFactory);
         
-        // Call the method
-        String result = (String) invokePrivateMethod(
-            udpListenerService,
-            "decodeDisPdu",
-            new Class<?>[]{byte[].class},
-            new Object[]{validSizeData}
-        );
-        
-        // Verify the result contains the error message
-        JsonNode rootNode = objectMapper.readTree(result);
-        assertTrue(rootNode.has("error"));
-        assertEquals("Unknown PDU type", rootNode.get("error").asText());
+        try {
+            // Create a byte array that's large enough to be a valid PDU
+            byte[] validSizeData = new byte[20];
+            
+            // Call the method
+            String result = (String) invokePrivateMethod(
+                udpListenerService,
+                "decodeDisPdu",
+                new Class<?>[]{byte[].class},
+                new Object[]{validSizeData}
+            );
+            
+            // Verify the result contains the error message
+            JsonNode rootNode = objectMapper.readTree(result);
+            assertTrue(rootNode.has("error"));
+            assertEquals("Unknown PDU type", rootNode.get("error").asText());
+        } finally {
+            // Restore the original pduFactory
+            pduFactoryField.set(udpListenerService, originalPduFactory);
+        }
     }
     
     @Test
@@ -254,30 +293,45 @@ class UdpListenerServiceTest {
         // Create a sample EntityStatePdu
         EntityStatePdu pdu = createSampleEntityStatePdu();
         
+        // Access the private pduFactory field
+        Field pduFactoryField = UdpListenerService.class.getDeclaredField("pduFactory");
+        pduFactoryField.setAccessible(true);
+        
+        // Create a spy of the original pduFactory
+        PduFactory spyPduFactory = spy(originalPduFactory);
+        
         // Mock the PduFactory to return the EntityStatePdu
-        when(pduFactory.createPdu(any(ByteBuffer.class))).thenReturn(pdu);
+        doReturn(pdu).when(spyPduFactory).createPdu(any(byte[].class));
         
-        // Create a byte array that's large enough to be a valid PDU
-        byte[] validSizeData = new byte[20];
+        // Set the spy pduFactory back to the service
+        pduFactoryField.set(udpListenerService, spyPduFactory);
         
-        // Call the method
-        String result = (String) invokePrivateMethod(
-            udpListenerService,
-            "decodeDisPdu",
-            new Class<?>[]{byte[].class},
-            new Object[]{validSizeData}
-        );
-        
-        // Verify that entityStatePduReceived was called
-        verify(metricsTracker, times(1)).entityStatePduReceived();
-        verify(metricsTracker, never()).fireEventPduReceived();
-        verify(metricsTracker, never()).collisionPduReceived();
-        verify(metricsTracker, never()).detonationPduReceived();
-        verify(metricsTracker, never()).pduReceived();
-        
-        // Verify the result is a valid JSON
-        JsonNode rootNode = objectMapper.readTree(result);
-        assertEquals("EntityStatePdu", rootNode.get("type").asText());
+        try {
+            // Create a byte array that's large enough to be a valid PDU
+            byte[] validSizeData = new byte[20];
+            
+            // Call the method
+            String result = (String) invokePrivateMethod(
+                udpListenerService,
+                "decodeDisPdu",
+                new Class<?>[]{byte[].class},
+                new Object[]{validSizeData}
+            );
+            
+            // Verify that entityStatePduReceived was called
+            verify(metricsTracker, times(1)).entityStatePduReceived();
+            verify(metricsTracker, never()).fireEventPduReceived();
+            verify(metricsTracker, never()).collisionPduReceived();
+            verify(metricsTracker, never()).detonationPduReceived();
+            verify(metricsTracker, never()).pduReceived();
+            
+            // Verify the result is a valid JSON
+            JsonNode rootNode = objectMapper.readTree(result);
+            assertEquals("EntityStatePdu", rootNode.get("type").asText());
+        } finally {
+            // Restore the original pduFactory
+            pduFactoryField.set(udpListenerService, originalPduFactory);
+        }
     }
     
     @Test
@@ -285,30 +339,45 @@ class UdpListenerServiceTest {
         // Create a sample FirePdu
         FirePdu pdu = createSampleFirePdu();
         
+        // Access the private pduFactory field
+        Field pduFactoryField = UdpListenerService.class.getDeclaredField("pduFactory");
+        pduFactoryField.setAccessible(true);
+        
+        // Create a spy of the original pduFactory
+        PduFactory spyPduFactory = spy(originalPduFactory);
+        
         // Mock the PduFactory to return the FirePdu
-        when(pduFactory.createPdu(any(ByteBuffer.class))).thenReturn(pdu);
+        doReturn(pdu).when(spyPduFactory).createPdu(any(byte[].class));
         
-        // Create a byte array that's large enough to be a valid PDU
-        byte[] validSizeData = new byte[20];
+        // Set the spy pduFactory back to the service
+        pduFactoryField.set(udpListenerService, spyPduFactory);
         
-        // Call the method
-        String result = (String) invokePrivateMethod(
-            udpListenerService,
-            "decodeDisPdu",
-            new Class<?>[]{byte[].class},
-            new Object[]{validSizeData}
-        );
-        
-        // Verify that fireEventPduReceived was called
-        verify(metricsTracker, never()).entityStatePduReceived();
-        verify(metricsTracker, times(1)).fireEventPduReceived();
-        verify(metricsTracker, never()).collisionPduReceived();
-        verify(metricsTracker, never()).detonationPduReceived();
-        verify(metricsTracker, never()).pduReceived();
-        
-        // Verify the result is a valid JSON
-        JsonNode rootNode = objectMapper.readTree(result);
-        assertEquals("FirePdu", rootNode.get("type").asText());
+        try {
+            // Create a byte array that's large enough to be a valid PDU
+            byte[] validSizeData = new byte[20];
+            
+            // Call the method
+            String result = (String) invokePrivateMethod(
+                udpListenerService,
+                "decodeDisPdu",
+                new Class<?>[]{byte[].class},
+                new Object[]{validSizeData}
+            );
+            
+            // Verify that fireEventPduReceived was called
+            verify(metricsTracker, never()).entityStatePduReceived();
+            verify(metricsTracker, times(1)).fireEventPduReceived();
+            verify(metricsTracker, never()).collisionPduReceived();
+            verify(metricsTracker, never()).detonationPduReceived();
+            verify(metricsTracker, never()).pduReceived();
+            
+            // Verify the result is a valid JSON
+            JsonNode rootNode = objectMapper.readTree(result);
+            assertEquals("FirePdu", rootNode.get("type").asText());
+        } finally {
+            // Restore the original pduFactory
+            pduFactoryField.set(udpListenerService, originalPduFactory);
+        }
     }
     
     private CollisionPdu createSampleCollisionPdu() {
@@ -360,30 +429,45 @@ class UdpListenerServiceTest {
         // Create a sample CollisionPdu
         CollisionPdu pdu = createSampleCollisionPdu();
         
+        // Access the private pduFactory field
+        Field pduFactoryField = UdpListenerService.class.getDeclaredField("pduFactory");
+        pduFactoryField.setAccessible(true);
+        
+        // Create a spy of the original pduFactory
+        PduFactory spyPduFactory = spy(originalPduFactory);
+        
         // Mock the PduFactory to return the CollisionPdu
-        when(pduFactory.createPdu(any(ByteBuffer.class))).thenReturn(pdu);
+        doReturn(pdu).when(spyPduFactory).createPdu(any(byte[].class));
         
-        // Create a byte array that's large enough to be a valid PDU
-        byte[] validSizeData = new byte[20];
+        // Set the spy pduFactory back to the service
+        pduFactoryField.set(udpListenerService, spyPduFactory);
         
-        // Call the method
-        String result = (String) invokePrivateMethod(
-            udpListenerService,
-            "decodeDisPdu",
-            new Class<?>[]{byte[].class},
-            new Object[]{validSizeData}
-        );
-        
-        // Verify that collisionPduReceived was called
-        verify(metricsTracker, never()).entityStatePduReceived();
-        verify(metricsTracker, never()).fireEventPduReceived();
-        verify(metricsTracker, times(1)).collisionPduReceived();
-        verify(metricsTracker, never()).detonationPduReceived();
-        verify(metricsTracker, never()).pduReceived();
-        
-        // Verify the result is a valid JSON
-        JsonNode rootNode = objectMapper.readTree(result);
-        assertEquals("CollisionPdu", rootNode.get("type").asText());
+        try {
+            // Create a byte array that's large enough to be a valid PDU
+            byte[] validSizeData = new byte[20];
+            
+            // Call the method
+            String result = (String) invokePrivateMethod(
+                udpListenerService,
+                "decodeDisPdu",
+                new Class<?>[]{byte[].class},
+                new Object[]{validSizeData}
+            );
+            
+            // Verify that collisionPduReceived was called
+            verify(metricsTracker, never()).entityStatePduReceived();
+            verify(metricsTracker, never()).fireEventPduReceived();
+            verify(metricsTracker, times(1)).collisionPduReceived();
+            verify(metricsTracker, never()).detonationPduReceived();
+            verify(metricsTracker, never()).pduReceived();
+            
+            // Verify the result is a valid JSON
+            JsonNode rootNode = objectMapper.readTree(result);
+            assertEquals("CollisionPdu", rootNode.get("type").asText());
+        } finally {
+            // Restore the original pduFactory
+            pduFactoryField.set(udpListenerService, originalPduFactory);
+        }
     }
     
     @Test
@@ -391,30 +475,45 @@ class UdpListenerServiceTest {
         // Create a sample DetonationPdu
         DetonationPdu pdu = createSampleDetonationPdu();
         
+        // Access the private pduFactory field
+        Field pduFactoryField = UdpListenerService.class.getDeclaredField("pduFactory");
+        pduFactoryField.setAccessible(true);
+        
+        // Create a spy of the original pduFactory
+        PduFactory spyPduFactory = spy(originalPduFactory);
+        
         // Mock the PduFactory to return the DetonationPdu
-        when(pduFactory.createPdu(any(ByteBuffer.class))).thenReturn(pdu);
+        doReturn(pdu).when(spyPduFactory).createPdu(any(byte[].class));
         
-        // Create a byte array that's large enough to be a valid PDU
-        byte[] validSizeData = new byte[20];
+        // Set the spy pduFactory back to the service
+        pduFactoryField.set(udpListenerService, spyPduFactory);
         
-        // Call the method
-        String result = (String) invokePrivateMethod(
-            udpListenerService,
-            "decodeDisPdu",
-            new Class<?>[]{byte[].class},
-            new Object[]{validSizeData}
-        );
-        
-        // Verify that detonationPduReceived was called
-        verify(metricsTracker, never()).entityStatePduReceived();
-        verify(metricsTracker, never()).fireEventPduReceived();
-        verify(metricsTracker, never()).collisionPduReceived();
-        verify(metricsTracker, times(1)).detonationPduReceived();
-        verify(metricsTracker, never()).pduReceived();
-        
-        // Verify the result is a valid JSON
-        JsonNode rootNode = objectMapper.readTree(result);
-        assertEquals("DetonationPdu", rootNode.get("type").asText());
+        try {
+            // Create a byte array that's large enough to be a valid PDU
+            byte[] validSizeData = new byte[20];
+            
+            // Call the method
+            String result = (String) invokePrivateMethod(
+                udpListenerService,
+                "decodeDisPdu",
+                new Class<?>[]{byte[].class},
+                new Object[]{validSizeData}
+            );
+            
+            // Verify that detonationPduReceived was called
+            verify(metricsTracker, never()).entityStatePduReceived();
+            verify(metricsTracker, never()).fireEventPduReceived();
+            verify(metricsTracker, never()).collisionPduReceived();
+            verify(metricsTracker, times(1)).detonationPduReceived();
+            verify(metricsTracker, never()).pduReceived();
+            
+            // Verify the result is a valid JSON
+            JsonNode rootNode = objectMapper.readTree(result);
+            assertEquals("DetonationPdu", rootNode.get("type").asText());
+        } finally {
+            // Restore the original pduFactory
+            pduFactoryField.set(udpListenerService, originalPduFactory);
+        }
     }
     
     @Test
@@ -426,29 +525,44 @@ class UdpListenerServiceTest {
         pdu.setPduType((short) 99);
         pdu.setTimestamp(1234567894L);
         
+        // Access the private pduFactory field
+        Field pduFactoryField = UdpListenerService.class.getDeclaredField("pduFactory");
+        pduFactoryField.setAccessible(true);
+        
+        // Create a spy of the original pduFactory
+        PduFactory spyPduFactory = spy(originalPduFactory);
+        
         // Mock the PduFactory to return the generic Pdu
-        when(pduFactory.createPdu(any(ByteBuffer.class))).thenReturn(pdu);
+        doReturn(pdu).when(spyPduFactory).createPdu(any(byte[].class));
         
-        // Create a byte array that's large enough to be a valid PDU
-        byte[] validSizeData = new byte[20];
+        // Set the spy pduFactory back to the service
+        pduFactoryField.set(udpListenerService, spyPduFactory);
         
-        // Call the method
-        String result = (String) invokePrivateMethod(
-            udpListenerService,
-            "decodeDisPdu",
-            new Class<?>[]{byte[].class},
-            new Object[]{validSizeData}
-        );
-        
-        // Verify that the generic pduReceived was called
-        verify(metricsTracker, never()).entityStatePduReceived();
-        verify(metricsTracker, never()).fireEventPduReceived();
-        verify(metricsTracker, never()).collisionPduReceived();
-        verify(metricsTracker, never()).detonationPduReceived();
-        verify(metricsTracker, times(1)).pduReceived();
-        
-        // Verify the result is a valid JSON
-        JsonNode rootNode = objectMapper.readTree(result);
-        assertEquals("Pdu", rootNode.get("type").asText());
+        try {
+            // Create a byte array that's large enough to be a valid PDU
+            byte[] validSizeData = new byte[20];
+            
+            // Call the method
+            String result = (String) invokePrivateMethod(
+                udpListenerService,
+                "decodeDisPdu",
+                new Class<?>[]{byte[].class},
+                new Object[]{validSizeData}
+            );
+            
+            // Verify that the generic pduReceived was called
+            verify(metricsTracker, never()).entityStatePduReceived();
+            verify(metricsTracker, never()).fireEventPduReceived();
+            verify(metricsTracker, never()).collisionPduReceived();
+            verify(metricsTracker, never()).detonationPduReceived();
+            verify(metricsTracker, times(1)).pduReceived();
+            
+            // Verify the result is a valid JSON
+            JsonNode rootNode = objectMapper.readTree(result);
+            assertEquals("Pdu", rootNode.get("type").asText());
+        } finally {
+            // Restore the original pduFactory
+            pduFactoryField.set(udpListenerService, originalPduFactory);
+        }
     }
 }
