@@ -98,4 +98,49 @@ class DisMetricsTrackerTest {
         // The lastPduReceivedTimestampMsAtomic should still hold the actual timestamp of the last PDU received [cite: 142]
         assertEquals(pduTimestamp, metrics.getLastPduReceivedTimestampMs(), "Last PDU timestamp should reflect the actual last PDU, even if old");
     }
+    
+    @Test
+    void testSpecificPduTypeTracking() throws InterruptedException {
+        // Record different PDU types
+        metricsTracker.entityStatePduReceived();
+        metricsTracker.fireEventPduReceived();
+        metricsTracker.collisionPduReceived();
+        metricsTracker.detonationPduReceived();
+        
+        RealTimeMetrics metrics = metricsTracker.getMetrics();
+        
+        // Check total PDU count (should be 4)
+        assertEquals(4, metrics.getPdusInLastSixtySeconds(), "Total PDU count should be 4");
+        
+        // Check individual PDU type counts
+        assertEquals(1, metrics.getEntityStatePdusInLastSixtySeconds(), "Entity state PDU count should be 1");
+        assertEquals(1, metrics.getFireEventPdusInLastSixtySeconds(), "Fire event PDU count should be 1");
+        assertEquals(1, metrics.getCollisionPdusInLastSixtySeconds(), "Collision PDU count should be 1");
+        assertEquals(1, metrics.getDetonationPdusInLastSixtySeconds(), "Detonation PDU count should be 1");
+    }
+    
+    @Test
+    void testSpecificPduTypePruning() throws InterruptedException {
+        // Record different PDU types
+        metricsTracker.entityStatePduReceived();
+        metricsTracker.fireEventPduReceived();
+        
+        // Wait for more than 60 seconds
+        TimeUnit.MILLISECONDS.sleep(ONE_MINUTE_MS + 1000); // e.g., 61 seconds
+        
+        // Record more PDUs after the wait
+        metricsTracker.collisionPduReceived();
+        metricsTracker.detonationPduReceived();
+        
+        RealTimeMetrics metrics = metricsTracker.getMetrics();
+        
+        // Check total PDU count (should be 2, as the first 2 should be pruned)
+        assertEquals(2, metrics.getPdusInLastSixtySeconds(), "Total PDU count should be 2 after pruning");
+        
+        // Check individual PDU type counts
+        assertEquals(0, metrics.getEntityStatePdusInLastSixtySeconds(), "Entity state PDU count should be 0 after pruning");
+        assertEquals(0, metrics.getFireEventPdusInLastSixtySeconds(), "Fire event PDU count should be 0 after pruning");
+        assertEquals(1, metrics.getCollisionPdusInLastSixtySeconds(), "Collision PDU count should be 1");
+        assertEquals(1, metrics.getDetonationPdusInLastSixtySeconds(), "Detonation PDU count should be 1");
+    }
 }
